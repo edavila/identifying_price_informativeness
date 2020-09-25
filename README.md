@@ -1,5 +1,9 @@
 # Replication Code for Identifying Price Informativeness
 
+#### Eduardo Davila and Cecilia Parlatore, 09/2020
+
+------
+
 The main project folder contains five subfolders and fourteen R source/markdown files. The import data subfolder has two R source files
 
 Instructions
