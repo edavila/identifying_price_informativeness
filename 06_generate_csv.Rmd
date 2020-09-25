@@ -1,0 +1,27 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r echo=FALSE, include=FALSE}
+ 
+library(here); library(tidyverse)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+```
+
+```{r}
+
+load("intermediate/results_rolling_clean.RData")
+
+rolling_q_clean <- results_rolling_q %>% select(year_start:n_obs, R2_long, R2_short, tau_pi_R)
+rolling_a_clean <- results_rolling_a %>% select(year_start:n_obs, R2_long, R2_short, tau_pi_R)
+
+write.csv(rolling_q_clean, 'output/csv/rolling_q.csv')
+write.csv(rolling_a_clean, 'output/csv/rolling_a.csv')
+
+```

@@ -1,0 +1,124 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(lubridate); library(slider)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+load("input/data_raw/raw_fred.RData")
+load("intermediate/clean_compustat.RData")
+load("intermediate/clean_crsp.RData")
+
+deflate <- TRUE
+shift   <- TRUE
+
+```
+
+# Deflating variables
+
+```{r deflator}
+
+if (deflate == TRUE) {
+
+deflator <- deflator %>% select(-date)
+
+crsp <- crsp %>%
+  left_join(deflator, by = c("year","month")) %>%
+  mutate_at(vars(mcap:adjprc), ~./deflator) %>%
+  select(-deflator)
+
+compustat_q <- compustat_q %>%
+  left_join(deflator, by = c("year", "month")) %>%
+  mutate_at(vars(ebit:book), ~./deflator) %>%
+  select(-deflator)
+
+compustat_a <- compustat_a %>%
+  left_join(deflator, by = c("year", "month")) %>%
+  mutate_at(vars(ebit:book), ~./deflator) %>%
+  select(-deflator)
+
+df_fred <- df_fred %>% 
+  left_join(deflator, by = c("year", "month")) %>% 
+  mutate_at(vars(cons:income), ~./deflator) %>% 
+  select(-deflator) %>% 
+  rename(date_fred = date)
+
+}
+
+```
+
+# Making FRED data quarterly and annual
+
+Compute moving sums
+
+```{r}
+
+fred_q <- df_fred %>%
+  mutate(cons   = slide_dbl(cons,   sum, .before = 2, .after = 0),
+         income = slide_dbl(income, sum, .before = 2, .after = 0))
+  
+fred_a <- df_fred %>%
+  mutate(cons   = slide_dbl(cons,   sum, .before = 11, .after = 0),
+         income = slide_dbl(income, sum, .before = 11, .after = 0))
+
+```
+
+# Merging crsp and compustat
+
+From Compustat: "DATADATE refers to the period in which the financial activity occurred". 
+If we were to map the data to real dates, we should use *fyear* instead, to guarantee that there are no gaps. (see e.g. permno = 10031)
+
+1. Contemporary: we match the date $t$ ebit with the date $t$ price.
+2. Shifted *(baseline timing)*: we match the date $t$ ebit with the price one month later (quarter) or one quarter later (annual). This timing difference allows investors to observe public earnings releases check rdq variable)
+
+Note that in the annual merge, consumption and income are still quarterly (we'll still use)
+
+```{r}
+
+fn_merge <- function(crsp, compustat, df_fred){
+
+  merged <- crsp %>%
+    inner_join(compustat, by = c("permno", "year", "month")) %>%
+    rename(date_crsp       = date, 
+            date_compustat = datadate) %>%
+    mutate(booktomarket = book/mcap) %>%
+    left_join(df_fred, by = c("year", "month")) %>% 
+    select(permno, year, month, date_crsp, date_compustat, date_fred, datefrac, everything())
+    
+  return(merged)
+}
+
+if (shift == TRUE) {
+
+  lag_merge <- 95 # 95, 35
+      
+  crsp_q_shifted <- crsp %>%
+    mutate(year  = year(date  - lag_merge),
+           month = month(date - lag_merge)) # shifts time back
+  
+  crsp_a_shifted <- crsp %>%
+    mutate(year  = year(date  - lag_merge),
+           month = month(date - lag_merge)) # shifts time back
+  
+  merged_q <- fn_merge(crsp_q_shifted, compustat_q, fred_q)
+  merged_a <- fn_merge(crsp_a_shifted, compustat_a, fred_a)
+
+}
+
+if (shift == FALSE) {
+  
+  merged_q <- fn_merge(crsp, compustat_q, fred_q)
+  merged_a <- fn_merge(crsp, compustat_a, fred_a)
+
+}
+
+save(merged_a, merged_q, file = "intermediate/dataset_merged.RData")
+
+```

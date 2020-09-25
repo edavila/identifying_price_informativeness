@@ -1,0 +1,443 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(cowplot); library(kableExtra); library(moments)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+load("intermediate/data_selected.RData"); source("functions/sc_ivol.R")
+load("intermediate/io_share.RData")
+
+#load("intermediate/results_rolling.RData")
+load("intermediate/results_rolling_clean.RData")
+
+options(scipen = 999)
+
+```
+
+# Summary results
+
+```{r}
+
+x_start <- 0
+x_end   <- 0.5
+x_step  <- 0.05
+x_axis  <- seq(x_start, x_end, x_step)
+
+y_start <- 0
+y_end   <- 0.3
+y_step  <- 0.02
+y_axis  <- seq(y_start, y_end, y_step)
+
+df <- results_rolling_q %>%
+  mutate(quarter_end = ifelse(month_end %in% c(1,2,3), 1,
+                       ifelse(month_end %in% c(4,5,6), 2,
+                       ifelse(month_end %in% c(7,8,9), 3, 4)))) %>% 
+  filter(year_end == 2015 & quarter_end == 4)
+
+n_permno <- length(unique(df$permno))
+
+p <- df %>% 
+  ggplot(aes(x = tau_pi_R)) +
+  geom_histogram(aes(y = stat(count) / sum(count)), bins = 50, colour = "black", fill = "steelblue", alpha = 0.2) + 
+  labs(x = "Relative Price Informativeness", 
+       y = "Frequency") + 
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  scale_x_continuous(breaks = x_axis, expand = c(0.003, 0.009)) +
+  scale_y_continuous(breaks = y_axis, expand = c(0.0, 0.0)) +
+  coord_cartesian(xlim = c(x_start, x_end), 
+                  ylim = c(y_start, y_end))
+  
+ggsave("output/output_figures/histogram_quarterly.pdf", plot = p, width = 6, height = 6, units = "in", dpi = 300)
+  
+```
+
+# Time Series
+
+```{r}
+
+df <- results_rolling_q %>%
+  mutate(quarter_end = ifelse(month_end %in% c(1,2,3), 1,
+                       ifelse(month_end %in% c(4,5,6), 2,
+                       ifelse(month_end %in% c(7,8,9), 3, 4))))
+  
+df_quarter <- df %>% 
+  group_by(year_end, quarter_end) %>% 
+  summarize(across(c(tau_pi_R), 
+                   list(median = ~ median(., na.rm = T),
+                        mean   = ~ mean(., na.rm = T),
+                        sd     = ~ sd(., na.rm = T),
+                        skew   = ~ skewness(., na.rm = T)),
+                   .names = "{col}_{fn}"),
+            n_a = n(),
+            .groups = "keep") %>% 
+  mutate(freq = "quarterly",
+         datefrac = year_end + quarter_end/4 - 1/8)
+
+df_year <- df %>% 
+  group_by(year_end) %>% 
+  summarize(across(c(tau_pi_R), 
+                   list(median = ~ median(., na.rm = T),
+                        mean   = ~ mean(., na.rm = T),
+                        sd     = ~ sd(., na.rm = T),
+                        skew   = ~ skewness(., na.rm = T)),
+                   .names = "{col}_{fn}"),
+            n_a = n(),
+            .groups = "keep") %>% 
+  mutate(freq = "annual",
+         datefrac = year_end + 0.5)
+  
+df_rolling <- rbind(df_year, df_quarter) %>% ungroup()
+
+# Plot 
+
+x_start <- 1980
+x_end   <- 2017
+x_step  <- 5
+x_axis  <- seq(x_start, x_end, x_step)
+
+y_start <- 0
+y_end   <- 0.09
+y_step  <- 0.01
+y_axis  <- seq(y_start, y_end, y_step)
+
+df_p1 <- df_rolling %>% 
+  filter(datefrac > 1980 & datefrac < 2017) %>%
+  filter(freq == "quarterly") %>% 
+  select(datefrac, tau_pi_R_median, tau_pi_R_mean)
+
+p1 <- ggplot(df_p1) + 
+  theme_classic() +
+  geom_line(aes(x = datefrac,   y = tau_pi_R_median), color = "steelblue", size = 1.5) +
+  geom_line(aes(x = datefrac,   y = tau_pi_R_mean),   color = "steelblue", size = 1.5) +
+  geom_point(aes(x = datefrac,  y = tau_pi_R_median), color = "black",     size = 2) +
+  geom_point(aes(x = datefrac,  y = tau_pi_R_mean),   color = "black",     size = 2) +
+  geom_smooth(data = subset(df_p1, datefrac > 1986),
+              aes(x = datefrac, y = tau_pi_R_mean),   color = "red", method = lm, formula = y~x, se = FALSE, linetype = "dashed") +
+  geom_smooth(data = subset(df_p1, datefrac > 1986),
+              aes(x = datefrac, y = tau_pi_R_median), color = "red", method = lm, formula = y~x, se = FALSE, linetype = "dashed") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16)) +
+  labs(x = "Year", y = "Relative Price Informativeness", title = "Mean and Median") + 
+  geom_text(aes(x = 2010, y = 0.06, label = "Mean",  size = 16)) + #0.056 or 0.0605
+  geom_text(aes(x = 2010, y = 0.028, label = "Median",  size = 16)) + # 0.026 or 0.03
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0)) +
+  scale_x_continuous(limits = c(x_start, x_end), breaks = x_axis, expand = c(0.02,0.02))
+  
+df_p2 <- df_rolling %>% 
+  filter(datefrac > 1980 & datefrac < 2017) %>%
+  filter(freq == "quarterly") %>% 
+  select(datefrac, tau_pi_R_sd)
+
+p2 <- ggplot(df_p2) + 
+  theme_classic() +
+  geom_line(aes(x = datefrac,   y = tau_pi_R_sd), color = "steelblue", size = 1.2) +
+  geom_point(aes(x = datefrac,  y = tau_pi_R_sd), color = "black",     size = 2) +
+  geom_smooth(data = subset(df_p2, datefrac > 1986),
+              aes(x = datefrac, y = tau_pi_R_sd), color = "red", method = lm, formula = y~x, se = FALSE, linetype = "dashed") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16)) +
+  labs(x = "Year", y = "Relative Price Informativeness", title = "Standard Deviation") + 
+  geom_text(aes(x = 2008, y = 0.045, label = "Standard Deviation",  size = 16)) + # 0.066
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0)) +
+  scale_x_continuous(limits = c(x_start, x_end), breaks = x_axis, expand = c(0.02,0.02))
+
+p3 <- df_rolling %>% 
+filter(datefrac > 1980 & datefrac < 2017) %>%
+filter(freq == "quarterly") %>% 
+select(datefrac, tau_pi_R_skew) %>% 
+ggplot() + theme_classic() +
+  geom_line(aes(x = datefrac, y = tau_pi_R_skew),     color = "steelblue", size = 1.2) +
+  geom_point(aes(x = datefrac, y = tau_pi_R_skew),    color = "black", size = 2) +
+  geom_smooth(aes(x = datefrac, y = tau_pi_R_skew), color = "red", method = lm, se = FALSE, linetype = "dashed") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Year", title = "Relative Price Informativeness: Skewness") + 
+  # geom_text(aes(x = 2008, y = 0.068, label = "Standard Deviation",  size = 14)) +
+  # scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0)) +
+  scale_x_continuous(limits = c(x_start, x_end), breaks = x_axis, expand = c(0.02,0.02))
+
+ggsave("output/output_figures/ts_quarterly_1.pdf", plot = p1,  width = 10.5, height = 6, units = "in", dpi = 300)
+ggsave("output/output_figures/ts_quarterly_2.pdf", plot = p2,  width = 10.5, height = 6, units = "in", dpi = 300)
+ggsave("output/output_figures/ts_quarterly_3.pdf", plot = p3,  width = 10.5, height = 6, units = "in", dpi = 300)
+
+plot_grid(p1, p2, ncol = 2)
+ggsave("output/output_figures/ts_quarterly.pdf", plot = last_plot(), width = 13, height = 6, units = "in", dpi = 300)
+
+```
+
+# Cross Section
+
+```{r}
+
+n <- 20
+
+df <- results_rolling_q %>% #
+  left_join(df_q %>% select(permno, year, month, mcap, booktomarket, turnover),
+                         by = c("permno" = "permno", "year_end" = "year", "month_end" = "month")) %>%
+  left_join(ivol,        by = c("permno" = "permno", "year_end" = "year", "month_end" = "month")) %>%
+  left_join(df_io_share, by = c("permno" = "permno", "year_end" = "year", "month_end" = "month")) %>%
+  filter(year_end > 1980 & year_end < 2017) %>%
+  mutate(book = ifelse(booktomarket < 0, NA, booktomarket),
+         size = log(mcap)) %>%
+  group_by(year_end) %>%
+  mutate(across(c(size, turnover, book, ivol, io_share), list(ntile = ~ntile(., n)), .names = "{col}_{fn}"))
+  
+df_size     <- df %>% group_by(year_end, size_ntile)     %>% summarize(characteristic = mean(size),     tau_pi_R = mean(tau_pi_R), var = "size", .groups = "keep") %>% rename("ntile" = size_ntile)
+df_turnover <- df %>% group_by(year_end, turnover_ntile) %>% summarize(characteristic = mean(turnover), tau_pi_R = mean(tau_pi_R), var = "size", .groups = "keep") %>% rename("ntile" = turnover_ntile)
+df_book     <- df %>% group_by(year_end, book_ntile)     %>% summarize(characteristic = mean(book),     tau_pi_R = mean(tau_pi_R), var = "size", .groups = "keep") %>% rename("ntile" = book_ntile) 
+df_ivol     <- df %>% group_by(year_end, ivol_ntile)     %>% summarize(characteristic = mean(ivol),     tau_pi_R = mean(tau_pi_R), var = "size", .groups = "keep") %>% rename("ntile" = ivol_ntile)
+df_io       <- df %>% group_by(year_end, io_share_ntile) %>% summarize(characteristic = mean(io_share), tau_pi_R = mean(tau_pi_R), var = "size", .groups = "keep") %>% rename("ntile" = io_share_ntile)
+
+df_plot = df_size %>% 
+  bind_rows(df_turnover) %>% 
+  bind_rows(df_book) %>% 
+  bind_rows(df_ivol) %>% 
+  bind_rows(df_io)
+
+theme_ax = theme(
+  axis.title.x = element_text(size = 30),
+  # axis.text.x = element_text(size = 30),
+  # axis.text.y = element_text(size = 30)
+  axis.title.y = element_text(size = 30),
+  )
+
+y_start <- 0
+y_end   <- 0.1
+y_step  <- 0.02
+y_axis = seq(y_start, y_end, y_step)
+
+p1 <- df_size %>% 
+  mutate(year = as.factor(year_end)) %>% 
+  ggplot(aes(x = characteristic, y = tau_pi_R)) + 
+  geom_point(color = "black", fill = "orange", alpha = 0.9) + 
+  geom_smooth(method = lm, se = F, color = "steelblue") +
+  facet_wrap( ~ year, scales = "free", ncol = 6) +
+  labs(x = "Size", 
+         y = "Relative Price Informativeness") + 
+  theme_classic() + theme_ax +
+  theme(text = element_text(size = 40)) +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0))
+
+p2 <- df_turnover %>% 
+  mutate(year = as.factor(year_end)) %>%
+  ggplot(aes(x = characteristic, y = tau_pi_R)) + 
+  geom_point(color = "black", fill = "orange", alpha = 0.9) +
+  geom_smooth(method = lm, se = F, color = "steelblue") +
+  facet_wrap( ~ year, scales = "free", ncol = 6) +
+  labs(x = "Turnover", 
+         y = "Relative Price Informativeness") + 
+  theme_classic() + theme_ax +
+  theme(text = element_text(size = 40)) +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0))
+
+p3 <- df_book %>% 
+  mutate(year = as.factor(year_end)) %>%
+  ggplot(aes(x = characteristic, y = tau_pi_R)) + 
+  geom_point(color = "black", fill = "orange", alpha = 0.9) +
+  geom_smooth(method = lm, se = F, color = "steelblue") +
+  facet_wrap( ~ year, scales = "free", ncol = 6) +
+  labs(x = "Value", 
+         y = "Relative Price Informativeness") + 
+  theme_classic() + theme_ax +
+  theme(text = element_text(size = 40)) +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0))
+
+p4 <- df_ivol %>% 
+  mutate(year = as.factor(year_end)) %>%
+  ggplot(aes(x = characteristic, y = tau_pi_R)) + 
+  geom_point(color = "black", fill = "orange", alpha = 0.9) +
+  geom_smooth(method = lm, se = F, color = "steelblue") +
+  facet_wrap( ~ year, scales = "free", ncol = 6) +
+  labs(x = "Idiosyncratic Volatility", 
+         y = "Relative Price Informativeness") + 
+  theme_classic() + theme_ax +
+  theme(text = element_text(size = 40)) +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0))
+
+p5 <- df_io %>% 
+  mutate(year = as.factor(year_end)) %>%
+  ggplot(aes(x = characteristic, y = tau_pi_R)) + 
+  geom_point(color = "black", fill = "orange", alpha = 0.9) +
+  geom_smooth(method = lm, se = F, color = "steelblue") +
+  facet_wrap( ~ year, scales = "free", ncol = 6) +
+  labs(x = "Institutional Ownership", 
+         y = "Relative Price Informativeness") + 
+  theme_classic() + theme_ax +
+  theme(text = element_text(size = 40)) +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.0,0.0))
+  
+directory <- "output/output_figures"
+namefile <- "rolling_"
+
+ggsave(paste(directory, "/", namefile, "size_quarterly.pdf",     sep = ""), plot = p1, width = 30, height = 35, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "turnover_quarterly.pdf", sep = ""), plot = p2, width = 30, height = 35, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "book_quarterly.pdf",     sep = ""), plot = p3, width = 30, height = 35, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "ivol_quarterly.pdf",     sep = ""), plot = p4, width = 30, height = 35, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "io_quarterly.pdf",       sep = ""), plot = p5, width = 30, height = 35, units = "in", dpi = 300)
+  
+```
+
+# Regressions
+
+```{r}
+
+reg_size     <- lm(tau_pi_R ~ characteristic + factor(year_end), data = df_size)
+reg_book     <- lm(tau_pi_R ~ characteristic + factor(year_end), data = df_book)
+reg_turnover <- lm(tau_pi_R ~ characteristic + factor(year_end), data = df_turnover)
+reg_ivol     <- lm(tau_pi_R ~ characteristic + factor(year_end), data = df_ivol)
+reg_io       <- lm(tau_pi_R ~ characteristic + factor(year_end), data = df_io)
+
+size     <- summary(reg_size)$coefficients[2,]     %>% data.frame() %>% slice(1:n() - 1)
+book     <- summary(reg_book)$coefficients[2,]     %>% data.frame() %>% slice(1:n() - 1)
+turnover <- summary(reg_turnover)$coefficients[2,] %>% data.frame() %>% slice(1:n() - 1)
+ivol     <- summary(reg_ivol)$coefficients[2,]     %>% data.frame() %>% slice(1:n() - 1)
+io       <- summary(reg_io)$coefficients[2,]       %>% data.frame() %>% slice(1:n() - 1)
+
+regressions <- cbind(size, book, turnover, ivol, io) %>% 
+  t() %>% 
+  data.frame() %>% 
+  mutate(across(starts_with("t"), format, digits = 2, nsmall = 2)) %>% 
+  mutate(across(starts_with("S"), format, digits = 2, nsmall = 4)) %>% 
+  mutate(across(starts_with("E"), format, digits = 2, nsmall = 4))
+
+rownames(regressions) <- c("Size", "Value", "Turnover", "Idiosyncratic Volatility", "Institutional Ownership")
+colnames(regressions) <- c("Estimate", "Std. Error", "t-stat")
+
+directory <- "output/output_tables"
+namefile  <- "fixed_effects_quarterly"
+
+kab      <- kable(regressions, "latex", booktabs = T)
+path     <- paste(directory, "/", namefile, ".tex", sep = "")
+fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+
+```
+
+```{r}
+
+df_char <- results_rolling_q %>% 
+  left_join(df_q %>% select(permno, year, month, sp500, exchcd ,sic1),
+            by = c("permno" = "permno", "year_end" = "year", "month_end" = "month")) %>% 
+  mutate(sp500 = factor(sp500)) %>%
+  filter(sic1 != "Public administration")
+
+reg_exchcd <- lm(tau_pi_R ~ exchcd + factor(year_end), data = df_char)
+reg_sp500  <- lm(tau_pi_R ~ sp500  + factor(year_end), data = df_char)
+reg_sic1   <- lm(tau_pi_R ~ sic1   + factor(year_end), data = df_char)
+
+exchcd <- summary(reg_exchcd)$coefficients[1:3,] %>% data.frame() %>% select(-starts_with("P"))
+sp500  <- summary(reg_sp500)$coefficients[1:2,]  %>% data.frame() %>% select(-starts_with("P"))
+sic1   <- summary(reg_sic1)$coefficients[1:7,]   %>% data.frame() %>% select(-starts_with("P"))
+
+reg_exchcd_fe <- lm(tau_pi_R ~ factor(year_end), data = df_char)
+reg_sp500_fe  <- lm(tau_pi_R ~ factor(year_end), data = df_char)
+reg_sic1_fe   <- lm(tau_pi_R ~ factor(year_end), data = df_char)
+
+reg_charac_1 <- rbind(exchcd, sp500) %>%
+  mutate(across(starts_with("t"), format, digits = 2, nsmall = 2)) %>% 
+  mutate(across(starts_with("S"), format, digits = 2, nsmall = 4)) %>% 
+  mutate(across(starts_with("E"), format, digits = 2, nsmall = 4))
+
+rownames(reg_charac_1) <- c("NYSE", "AMEX", "NASDAQ", "No S&P 500", "S&P 500")
+colnames(reg_charac_1) <- c("Estimate", "Std. Error", "t-stat")
+
+reg_charac_2 <- rbind(sic1) %>%
+  mutate(across(starts_with("t"), format, digits = 2, nsmall = 2)) %>% 
+  mutate(across(starts_with("S"), format, digits = 2, nsmall = 4)) %>% 
+  mutate(across(starts_with("E"), format, digits = 2, nsmall = 4))
+
+rownames(reg_charac_2) <- c("Agric./Mining/Constr.", "Manufacturing", "Transportation", "Wholesale/Retail", "Finance/Insurance", "Services", "Public Admin.")
+colnames(reg_charac_2) <- c("Estimate", "Std. Error", "t-stat")
+
+## Tables
+
+directory <- "output/output_tables"
+namefile  <- "fixed_effects_charac_1_quarterly"
+
+kab      <- kable(reg_charac_1, "latex", booktabs = T)
+path     <- paste(directory, "/", namefile, ".tex", sep = "")
+fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+
+directory <- "output/output_tables"
+namefile  <- "fixed_effects_charac_2_quarterly"
+
+kab      <- kable(reg_charac_2, "latex", booktabs = T)
+path     <- paste(directory, "/", namefile, ".tex", sep = "")
+fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+
+## Plots
+
+y_start <- -0.1
+y_end   <- 0.6
+y_step  <- 0.1
+y_axis  <- seq(y_start, y_end, y_step)
+
+df_exchcd_fe <- data.frame(reg_exchcd_fe$residuals, df_char$exchcd) %>% 
+  rename(resid = reg_exchcd_fe.residuals, exchcd = df_char.exchcd) %>% 
+  mutate(exchcd = factor(exchcd, levels = c("NYSE", "NASDAQ", "AMEX")))
+  
+pc1 <- df_exchcd_fe %>% 
+  ggplot(aes(x = exchcd, y = resid)) + 
+  geom_boxplot(fill = "white", colour = "steelblue", alpha = 0.3, outlier.colour = "steelblue", outlier.size = 0.1 ) +
+  theme_classic() +
+  labs(x = "", y = "Price Informativeness (residual)", title = "Exchange") +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.01, 0.01)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16))
+
+df_sp500_fe <- data.frame(reg_sp500_fe$residuals, df_char$sp500) %>%
+  rename(resid = reg_sp500_fe.residuals, sp500 = df_char.sp500) %>% 
+  mutate(sp500 = fct_recode(sp500, "S&P 500" = "1", "No S&P 500" = "0")) %>% 
+  mutate(sp500 = factor(sp500, levels = c("S&P 500", "No S&P 500")))
+                               
+pc2 <- df_sp500_fe %>% 
+  ggplot(aes(x = sp500, y = resid)) + 
+  geom_boxplot(fill = "white", colour = "steelblue", alpha = 0.3, outlier.colour = "steelblue", outlier.size = 0.1 ) +
+  theme_classic() +
+  labs(x = "", y = "Price Informativeness (residual)", title = "S&P 500") +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.01, 0.01)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16))
+
+df_charac_fe <- data.frame(reg_sic1_fe$residuals, df_char$sic1) %>%
+  rename(resid = reg_sic1_fe.residuals, sic1 = df_char.sic1) %>% 
+  mutate(sic1     = fct_recode(sic1,
+                                            "Agric./Mining/Constr." = "Agriculture/Mining/Construction",
+                                            "Transportation"        = "Transportation/Communications",
+                                            "Wholesale/Retail"      = "Wholesale/Retail trade",
+                                            "Public Admin."         = "Public administration"))
+
+pc3 <- df_charac_fe %>% 
+  ggplot(aes(x = sic1, y = resid)) + 
+  geom_boxplot(fill = "white", colour = "steelblue", alpha = 0.3, outlier.colour = "steelblue", outlier.size = 0.1 ) +
+  theme_classic() +
+  labs(x = "", y = "Price Informativeness (residual)", title = "Sector") +
+  scale_y_continuous(limits = c(y_start, y_end), breaks = y_axis, expand = c(0.01, 0.01)) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1)) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(text = element_text(size = 16))
+
+directory <- "output/output_figures"
+namefile <- "charac_"
+
+ggsave(paste(directory, "/", namefile, "exchange_quarterly.pdf", sep = ""), plot = pc1, width = 5, height = 5, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "sp500_quarterly.pdf",    sep = ""), plot = pc2, width = 5, height = 5, units = "in", dpi = 300)
+ggsave(paste(directory, "/", namefile, "sector_quarterly.pdf",   sep = ""), plot = pc3, width = 5, height = 5, units = "in", dpi = 300)
+
+plot_grid(pc1, pc2, ncol = 2)
+ggsave("output/output_figures/charac_combined_quarterly.pdf", plot = last_plot(), width = 10, height = 5, units = "in", dpi = 300)
+
+# system("move_to_draft.cmd", input = "a")
+
+```
+

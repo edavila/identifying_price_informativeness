@@ -1,0 +1,70 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(cowplot); library(kableExtra)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+source("functions/fn_results.R")
+
+load("intermediate/data_selected.RData"); source("functions/sc_ivol.R")
+load("intermediate/io_share.RData")
+
+#load("intermediate/results_full.RData")
+load("intermediate/results_full_clean.RData")
+
+options(scipen = 999)
+
+```
+
+# Summary results
+
+```{r}
+
+sum_results(results_full_q, "results_full_q")
+sum_results(results_full_q, "results_full_q")
+
+df_io_share_permno <- df_io_share_permno %>% filter(avg_share <= 1)
+
+n <- 20
+
+results_charac_q <- build_charac(df_q, df_io_share_permno, results_full_q, n)
+results_charac_a <- build_charac(df_a, df_io_share_permno, results_full_q, n)
+
+fig_all(results_charac_q,    "results_charac_q_")
+fig_all(results_charac_a,    "results_charac_a_")
+
+fig_binned(results_charac_q, "results_charac_q_binned_")
+fig_binned(results_charac_a, "results_charac_a_binned_")
+
+x_start <- 0
+x_end   <- 0.5
+x_step  <- 0.05
+x_axis  <- seq(x_start, x_end, x_step)
+
+y_start <- 0
+y_end   <- 0.37
+y_step  <- 0.02
+y_axis  <- seq(y_start, y_end, y_step)
+
+p <- results_full_q %>% 
+  ggplot(aes(x = tau_pi_R)) +
+  geom_histogram(aes(y = stat(count) / sum(count)), bins = 51, colour = "black", fill = "steelblue", alpha = 0.2) + 
+  labs(x = "Relative Price Informativeness", 
+       y = "Frequency") + 
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  scale_x_continuous(breaks = x_axis, expand = c(0.003, 0.009)) +
+  scale_y_continuous(breaks = y_axis, expand = c(0.00, 0.0)) +
+  coord_cartesian(xlim  = c(x_start, x_end), ylim = c(y_start, y_end))
+
+ggsave("output/output_figures/histogram_all_quarterly.pdf", plot = p, width = 6, height = 6, units = "in", dpi = 300)
+
+```

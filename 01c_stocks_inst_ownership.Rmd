@@ -1,0 +1,195 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+
+library(here); library(tidyverse); library(data.table); library(lubridate); library(zoo)
+load("input/data_raw/raw_inst_ownership.RData")
+
+```
+
+This file generates institutional ownership variables.
+
+# CRSP
+
+```{r}
+
+crsp_m <- crsp %>%
+  mutate(mdate = ceiling_date(date, unit = "months")  - days(1)) %>% 
+  mutate(qdate = ceiling_date(date, unit = "quarter") - days(1)) %>% 
+  mutate(p = abs(prc) / cfacpr) %>% 
+  mutate(tso = shrout*cfacshr*1e3) %>% # adjusted
+  mutate(me = (p * tso) / 1e6) %>% 
+  select(permno, mdate, qdate, date, cfacshr, p, tso, me, shrout)
+
+#Get last monthly date for each quarter for each stock
+qend <- crsp_m %>% 
+  select(permno, mdate, qdate) %>% 
+  group_by(permno, qdate) %>% 
+  mutate(mdate = max(mdate))
+
+#Merge back, this gives you last monthly obs for each quarter
+crsp_qend <- crsp_m %>% 
+  inner_join(qend, by = c('permno', 'qdate', 'mdate')) %>% 
+  distinct()
+
+```
+
+# Ownership data
+
+```{r}
+
+#First vintage with holding data for each mgrno-rdate pair
+min_fdate <- fst_vint %>% 
+  group_by(mgrno, rdate) %>% 
+  mutate(fdate = min(fdate)) %>% 
+  select(mgrno, rdate, fdate) %>% 
+  distinct()
+
+#Merge back to get first vintage records, get lag rdate
+fst_vint <- inner_join(fst_vint, min_fdate, by = c('mgrno', 'rdate', 'fdate')) %>% 
+  arrange(mgrno, rdate) %>%
+  group_by(mgrno) %>% 
+  mutate(lag_rdate = lag(rdate, 1))
+
+#Quarters btwn rdate and lag_rdate
+fst_vint <- fst_vint %>% 
+  mutate(rdate_year = year(rdate)) %>% 
+  mutate(rdate_qtr = quarter(rdate)) %>% 
+  mutate(lag_rdate_year = year(lag_rdate)) %>% 
+  mutate(lag_rdate_qtr = quarter(lag_rdate)) %>%
+  mutate(qtr = 4 * (rdate_year - lag_rdate_year) + (rdate_qtr - lag_rdate_qtr))
+
+#First report flag
+fst_vint <- fst_vint %>% 
+  mutate(first_report = is.na(qtr) | qtr >= 2) %>% 
+  subset(select = -qtr)
+
+#Last report by manager or missing reports in next quarter + Quarters btwn rdate and lag_rdate
+fst_vint <- fst_vint %>% 
+  arrange(mgrno, desc(rdate)) %>% 
+  group_by(mgrno) %>% 
+  mutate(lead_rdate = lag(rdate, 1)) %>%
+  mutate(lead_rdate_year = year(lead_rdate)) %>% mutate(lead_rdate_qtr = quarter(lead_rdate)) %>%
+  mutate(qtr = 4 * (lead_rdate_year - rdate_year) + (lead_rdate_qtr - rdate_qtr))
+
+#Last report flag
+fst_vint <- fst_vint %>% mutate(last_report = is.na(qtr) | qtr >= 2) %>% subset(select = -qtr)
+
+#total no. of 13f filers per quarter
+fst_vint <- fst_vint %>% 
+  filter(rdate <= as.Date("2017-12-31") & rdate >= as.Date("1980-03-08")) %>% 
+  subset(select = -c(lag_rdate, lead_rdate)) %>% 
+  arrange(rdate, mgrno)
+
+NumInst <- fst_vint %>% 
+  group_by(rdate) %>% 
+  mutate(ones = 1) %>% 
+  mutate(NumInst = sum(ones)) %>%
+  subset(select = c(rdate, NumInst)) %>%
+  distinct()
+
+fst_vint <- left_join(fst_vint, NumInst, by = 'rdate') %>% 
+  subset(select = -mgrname)
+
+```
+
+Get s34type3 data and merge with permno
+
+```{r}
+
+holdings_v1 <- inner_join(fst_vint, s34type3, by = c('fdate','mgrno'))
+
+crsp2 <- crsp2 %>% rename(cusip = ncusip)
+
+holdings_v2 <- inner_join(holdings_v1, crsp2, by = 'cusip')
+holdings_v2 <- holdings_v2 %>% subset(select = -cusip)
+
+```
+
+Adjust shares
+
+```{r}
+
+crsp_qend <- crsp_qend %>% 
+  subset(select = c(qdate, permno, cfacshr)) %>% 
+  rename(fdate = qdate)
+
+holdings <- inner_join(holdings_v2, crsp_qend, by = c('permno', 'fdate'))
+holdings <- as.data.table(holdings)
+
+#adjustment
+holdings <- holdings %>% 
+  mutate(shares_adj = shares*cfacshr) %>% 
+  subset(select = -c(shares, cfacshr, fdate))
+
+holdings <- holdings %>% 
+  filter(shares_adj > 0)
+
+```
+
+Institutional measures
+
+We want io_total/tso
+
+```{r}
+
+# # no. owners
+# io_numowners <- holdings %>% 
+#   group_by(permno, rdate) %>% 
+#   summarize(numowners = n())
+# 
+# # no. institutions
+# io_numinst <-  holdings %>% 
+#   group_by(permno, rdate) %>% 
+#   summarize(numinst = max(NumInst))
+
+# new/old inst. and total inst. shares
+io_total <- holdings %>% 
+  group_by(permno, rdate) %>% 
+  summarize(newinst  = sum(first_report),
+            oldinst  = sum(last_report),
+            io_total = sum(shares_adj, na.rm = TRUE))
+
+# tmp <- holdings %>% 
+#   subset(select = c(permno, rdate, shares_adj)) %>%
+#   mutate(shares_adj2 = shares_adj^2)
+
+# #uss
+# io_uss <- tmp %>% 
+#   group_by(permno, rdate) %>% 
+#   summarize(io_ss = sum(shares_adj2))
+
+#merge together
+# io_metrics <- inner_join(io_numowners, io_numinst, by = c('permno', 'rdate'))
+# io_metrics <- inner_join(io_metrics,   io_total,   by = c('permno', 'rdate'))
+# io_metrics <- inner_join(io_metrics,   io_uss,     by = c('permno', 'rdate'))
+
+# #mean across dates by permno
+# io_summary <- io_metrics %>% 
+#   group_by(permno) %>% 
+#   summarize(io_mean = mean(io_total))
+
+df_io_share <- io_total %>% 
+  mutate(year = year(rdate), month = month(rdate)) %>% 
+  left_join(crsp_m %>% 
+              mutate(year = year(date), month = month(date)) %>% 
+              select(year, month, permno, tso), 
+            by = c("permno", "month", "year")) %>% 
+  filter(tso > 0) %>% 
+  mutate(io_share = io_total/tso) %>% 
+  select(year, month, rdate, io_share, io_total, tso)
+  
+df_io_share_permno <- df_io_share %>% 
+  group_by(permno) %>% 
+  summarize(avg_share = mean(io_share))
+
+save(df_io_share, df_io_share_permno, file = "intermediate/io_share.RData")
+
+```

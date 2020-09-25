@@ -1,0 +1,256 @@
+#LyX 2.3 created this file. For more info see http://www.lyx.org/
+\lyxformat 544
+\begin_document
+\begin_header
+\save_transient_properties true
+\origin unavailable
+\textclass article
+\begin_preamble
+\usepackage{epstopdf}
+\usepackage{float}% For images, using .eps, strict with placing figures
+
+\pagenumbering{arabic}	% Arabic numbers for the pages (1st page is corrected in text)
+\pagestyle{plain}	% Only the number in the page
+
+%%%%% MY STYLE%%%%%%%%%%%
+
+% Page Layout
+\oddsidemargin=0mm
+\evensidemargin=0mm
+\textwidth=168mm
+\textheight=227mm
+\topmargin=-30pt
+\headheight=12truept
+\headsep=25pt
+\marginparsep=1pt
+\marginparwidth=1pt
+\footskip=37pt
+\hoffset=0mm
+\voffset=-6mm
+
+\setlength\parindent{0pt}
+\usepackage{parskip}
+
+% Tolerance for hyphenation
+\tolerance=100000
+\pretolerance=100000
+
+% Line spacing (1.3 is one and a half, 1.6 is double)
+\linespread{1.25}
+
+% Paragraph indenting
+%\setlength{\parskip}{1ex}
+%\setlength{\parindent}{0in}
+
+% Disallow x- or -xx breaks
+%\lefthyphenmin=2 \righthyphenmin=3
+%\widowpenalty=10000
+%\clubpenalty=10000
+
+\usepackage{enumitem}
+\end_preamble
+\use_default_options true
+\maintain_unincluded_children false
+\language english
+\language_package default
+\inputencoding auto
+\fontencoding global
+\font_roman "palatino" "default"
+\font_sans "default" "default"
+\font_typewriter "default" "default"
+\font_math "auto" "auto"
+\font_default_family rmdefault
+\use_non_tex_fonts false
+\font_sc false
+\font_osf false
+\font_sf_scale 100 100
+\font_tt_scale 100 100
+\use_microtype false
+\use_dash_ligatures true
+\graphics default
+\default_output_format default
+\output_sync 1
+\bibtex_command default
+\index_command default
+\paperfontsize 12
+\spacing single
+\use_hyperref false
+\papersize default
+\use_geometry false
+\use_package amsmath 1
+\use_package amssymb 1
+\use_package cancel 1
+\use_package esint 1
+\use_package mathdots 1
+\use_package mathtools 1
+\use_package mhchem 1
+\use_package stackrel 1
+\use_package stmaryrd 1
+\use_package undertilde 1
+\cite_engine basic
+\cite_engine_type default
+\biblio_style plain
+\use_bibtopic false
+\use_indices false
+\paperorientation portrait
+\suppress_date false
+\justification true
+\use_refstyle 1
+\use_minted 0
+\index Index
+\shortcut idx
+\color #008000
+\end_index
+\secnumdepth 3
+\tocdepth 3
+\paragraph_separation indent
+\paragraph_indentation default
+\is_math_indent 0
+\math_numbering_side default
+\quotes_style english
+\dynamic_quotes 0
+\papercolumns 1
+\papersides 1
+\paperpagestyle default
+\tracking_changes false
+\output_changes true
+\html_math_output 0
+\html_css_as_file 0
+\html_be_strict false
+\end_header
+
+\begin_body
+
+\begin_layout Standard
+\noindent
+
+\series bold
+Readme file to replicate 
+\begin_inset Quotes eld
+\end_inset
+
+Identifying Price Informativeness
+\begin_inset Quotes erd
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\noindent
+Eduardo Dávila and Cecilia Parlatore
+\end_layout
+
+\begin_layout Standard
+\noindent
+
+\series bold
+\begin_inset VSpace smallskip
+\end_inset
+
+
+\end_layout
+
+\begin_layout Standard
+\noindent
+The main project folder contains five subfolders and fourteen R source/markdown
+ files.
+ The import data subfolder has two R source files
+\end_layout
+
+\begin_layout Subsubsection*
+Instructions
+\end_layout
+
+\begin_layout Enumerate
+Run the files 
+\family typewriter
+01_stocks_import.R
+\family default
+, 
+\family typewriter
+02_stocks_import_inst_ownership.R
+\family default
+, and 
+\family typewriter
+03_move_files_to_input_raw.cmd
+\family default
+ in the 
+\family typewriter
+import_data
+\family default
+ folder
+\end_layout
+
+\begin_deeper
+\begin_layout Itemize
+The file 
+\family typewriter
+03_move_files_to_input_raw.cmd
+\family default
+ simply moves the output files to the 
+\family typewriter
+input/data_raw
+\family default
+ folder.
+ It only works for windows.
+ In other OS's, simply move the files manually.
+\end_layout
+
+\end_deeper
+\begin_layout Enumerate
+Run the files in the main project folder sequentially, starting with 
+\family typewriter
+00b_inst_ownership.Rmd
+\family default
+.
+\end_layout
+
+\begin_layout Enumerate
+Alternatively, simply run the file 
+\family typewriter
+00_stocks_main.R
+\family default
+.
+\end_layout
+
+\begin_layout Subsubsection*
+Comments
+\end_layout
+
+\begin_layout Itemize
+A complete run of the code generates all the figure and tables in the paper
+ with the exception of those with public signals.
+\end_layout
+
+\begin_layout Itemize
+The results with public signals are obtained by uncommenting the variables
+ 
+\family typewriter
+controls_levels
+\family default
+ and 
+\family typewriter
+controls_logs
+\family default
+ in the file 
+\family typewriter
+04a_stocks_recover.Rmd
+\family default
+ and running the code gain.
+\end_layout
+
+\begin_layout Itemize
+The files 
+\family typewriter
+rolling_a.csv
+\family default
+ and 
+\family typewriter
+rolling_q.csv
+\family default
+ include the estimated rolling measures price informativeness by stock (permno).
+\end_layout
+
+\end_body
+\end_document

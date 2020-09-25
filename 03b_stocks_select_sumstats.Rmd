@@ -1,0 +1,153 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(kableExtra);
+path <- here::here(); print(path); setwd(path); rm(path)
+
+load("intermediate/data_selected.RData")
+
+options(scipen = 999) # no scientific notation
+
+```
+
+# Summary Statistics: Data
+
+First define function sum_stat().
+
+
+```{r}
+
+# input_df <- df_q
+
+sum_stats <- function(input_df, namefile){
+  
+results <- input_df %>%
+    select(delta_log_price,ebit) %>% 
+    summarize(across(everything(), 
+                     list(mean   = ~ mean(.,          na.rm = T),
+                          sd     = ~ sd(.,            na.rm = T),
+                          p10    = ~ quantile(., 0.1, na.rm = T, names = F),
+                          median = ~ median(.,        na.rm = T),
+                          p90    = ~ quantile(., 0.9, na.rm = T, names = F)),
+              .names = "{fn}.{col}")) %>% 
+    pivot_longer(everything()) %>% 
+    separate(name, c("stat", "var"), sep = "(\\.)") %>% 
+    pivot_wider(names_from = stat, values_from = value) %>% 
+    mutate(across(where(is.numeric), format, digits = 4, nsmall = 2)) %>% 
+    rename("Mean"     = mean, 
+           "St. Dev"  = sd, 
+           "P10"      = p10, 
+           "Median"   = median, 
+           "P90"      = p90) %>% 
+    data.frame() %>%  
+    select(-var)
+
+   rownames(results) <- c("Change in log price", "Earnings")
+
+   directory <- "output/output_tables/"
+  kab      <- kable(results, "latex", booktabs = T)
+  path     <- paste(directory, namefile, ".tex", sep = "")
+  fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+
+results2 <- input_df %>% group_by(permno) %>% 
+    summarize(count = n(), 
+              mean_payoff = mean(ebit, na.rm = T), 
+              std_payoff  = sd(ebit, na.rm = T)) %>% 
+    select(mean_payoff,std_payoff) %>% 
+    summarize(across(everything(), 
+                     list(mean   = ~ mean(.,          na.rm = T),
+                          sd     = ~ sd(.,            na.rm = T),
+                          p10    = ~ quantile(., 0.1, na.rm = T, names = F),
+                          median = ~ median(.,        na.rm = T),
+                          p90    = ~ quantile(., 0.9, na.rm = T, names = F)),
+              .names = "{fn}.{col}")) %>% 
+    pivot_longer(everything()) %>% 
+    separate(name, c("stat", "var"), sep = "(\\.)") %>% 
+    pivot_wider(names_from = stat, values_from = value) %>% 
+    mutate(across(where(is.numeric), format, digits = 4, nsmall = 2)) %>% 
+    rename("Mean"     = mean, 
+           "St. Dev"  = sd, 
+           "P10"      = p10, 
+           "Median"   = median, 
+           "P90"      = p90) %>% 
+    data.frame() %>%  
+    select(-var)
+   
+    rownames(results2) <-  c("Mean Earnings","St. Dev Earnings")
+   
+  directory <- "output/output_tables/"
+  kab      <- kable(results, "latex", booktabs = T)
+  path     <- paste(directory, namefile,"_permno", ".tex", sep = "")
+  fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+  
+
+  p <- input_df %>% group_by(permno) %>% 
+    summarize(count = n(), 
+              std_payoff  = sd(ebit, na.rm = T)) %>% 
+    ggplot() + 
+    aes(std_payoff) + 
+    geom_density() + 
+    scale_x_log10() + 
+    labs(x = "St. Dev. Earnings", y = "Density (# of securities)")
+  
+  name <- paste("output/output_figures/", namefile, ".pdf", sep = "")
+  ggsave(name, plot = p, width = 12, height = 5, units = "in", dpi = 300)
+  
+return()
+  
+}
+
+summ_q <- sum_stats(df_q, "summary_stats_q")
+summ_a <- sum_stats(df_a, "summary_stats_a")
+
+```
+
+```{r}
+
+## Average growth rate dispersion
+
+df_earnings <- df_q %>% group_by(permno) %>% 
+    summarize(count = n(), 
+              mean_payoff = mean(delta_log_payoff_growth, na.rm = T),
+              std_payoff  = sd(delta_log_payoff_growth, na.rm = T)) %>% 
+    mutate(log_std_payoff = log(std_payoff))
+
+mean(df_earnings$mean_payoff)
+median(df_earnings$mean_payoff)
+
+x_start <- -3
+x_end   <- 7.5
+x_step  <- 1
+x_axis  <- seq(x_start, x_end, x_step)
+x_labels <- exp(x_axis) %>% format(digits = 1)
+
+y_start <- 0
+y_end   <- 0.05
+y_step  <- 0.01
+y_axis  <- seq(y_start, y_end, y_step)
+
+p <- df_earnings %>% 
+  ggplot(aes(x = log_std_payoff)) +
+  geom_histogram(aes(y = stat(count) / sum(count)), bins = 81, colour = "black", fill = "steelblue", alpha = 0.2) + 
+  labs(x = "Standard Deviation of Earnings' Growth Rates (log-scale)", 
+       y = "Frequency") +
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  scale_x_continuous(breaks = x_axis, labels = x_labels, expand = c(0.003, 0.009)) +
+  scale_y_continuous(breaks = y_axis, expand = c(0.0, 0.0)) +
+  coord_cartesian(xlim  = c(x_start, x_end), ylim = c(y_start, y_end))
+
+  
+p
+ggsave("output/output_figures/earnings_sd_histogram_quarterly.pdf", plot = p, width = 12, height = 5, units = "in", dpi = 300)
+  
+```
+  

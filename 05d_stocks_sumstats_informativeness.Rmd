@@ -1,0 +1,230 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(cowplot); library(data.table)
+library(moments); library(kableExtra); library(AER)
+
+#load("intermediate/results_rolling.RData")
+load("intermediate/results_rolling_clean.RData")
+
+options(scipen = 999)
+
+```
+
+## Yearly moments
+
+```{r}
+
+input_df <- results_rolling_q
+  
+fn_yearly_moments <- function(input_df, namefile, type){
+  
+  results <- input_df %>%
+    group_by(permno, year_end) %>%
+    summarize(tau_pi_R = mean(tau_pi_R, na.rm = T), .groups = "drop") %>% #take mean if multiple obs per permno per year
+    # select(-permno) %>%
+    group_by(year_end) %>%
+    summarize(
+      across(tau_pi_R, list(
+          Median = ~ median(.,        na.rm = T),
+          Mean   = ~ mean(.,          na.rm = T),
+          SD     = ~ sd(.,            na.rm = T),
+          Skew   = ~ skewness(.,      na.rm = T),
+          Kurt   = ~ kurtosis(.,      na.rm = T) - 3, # minus three yields excess kurtosis
+          # Min    = ~ min(.,           na.rm = T),
+          P5     = ~ quantile(., 0.05, na.rm = T, names = F),
+          P25    = ~ quantile(., 0.25, na.rm = T, names = F),
+          P75    = ~ quantile(., 0.75, na.rm = T, names = F),
+          P95    = ~ quantile(., 0.95, na.rm = T, names = F),
+          # Max    = ~ max(.,            na.rm = T),
+          n      = ~ n())),
+      .groups = "drop")
+  
+  colnames(results) <- gsub("tau_pi_R_", "", colnames(results))
+
+if (type == "annual") { 
+  results <- results %>% filter(year_end >= 1980 & year_end < 2017) #tiny samples oth.
+}
+
+if (type == "quarterly") { 
+  results <- results %>% filter(year_end >= 1980 & year_end < 2018) #tiny samples oth.
+}
+  
+results <- results %>% rename("$t$"  = year_end,
+                          "$Median$" = Median,
+                          "$Mean$"   = Mean,
+                          "$SD$"     = SD,
+                          "$Skew$"   = Skew,
+                          "$Kurt$"   = Kurt,
+                          # "$Min$"    = Min,
+                          "$P5$"     = P5,
+                          "$P25$"    = P25,
+                          "$P75$"    = P75,
+                          "$P95$"    = P95,
+                          # "$Max$"    = Max,
+                          "$n$"      = n)
+
+  kab      <- kable(results, "latex", booktabs = T,  digits = 4, linesep = "", escape = FALSE)
+  path     <- paste("output/output_tables/", namefile, ".tex", sep = "")
+  fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+  
+return()
+
+}
+
+fn_yearly_moments(results_rolling_q, "rolling_quarterly_moments_by_year", "quarterly")
+fn_yearly_moments(results_rolling_a, "rolling_annual_moments_by_year", "annual")
+
+```
+
+```{r}
+
+input_df <- results_rolling_q
+
+fn_yearly_correlations <- function(input_df, namefile, type){
+  
+  results <- input_df %>% 
+    group_by(permno, year_end) %>% 
+    summarize(tau_pi_R = mean(tau_pi_R, na.rm = T), .groups = "drop") %>% #take mean if multiple obs per permno per year
+    group_by(permno) %>% 
+    mutate(count = n(),
+           year_dif = year_end - lag(year_end),
+           max_dif = max(year_dif, na.rm = TRUE)) %>%
+    filter(count > 1) %>% # each permno must have data for more than 1 year
+    filter(max_dif == 1) %>% # we drop those permnos for which there are jumps
+    select(permno, year_end, tau_pi_R) %>%
+    arrange(permno) %>%
+    mutate(
+      lag_1 = lag(tau_pi_R, 1),
+      lag_2 = lag(tau_pi_R, 2),
+      lag_3 = lag(tau_pi_R, 3),
+      lag_4 = lag(tau_pi_R, 4),
+      lag_5 = lag(tau_pi_R, 5)) %>%
+    group_by(year_end) %>%
+    summarize(across(c(tau_pi_R), list(
+        rho_t_1  = ~ cor(., lag_1, use = "pairwise.complete.obs"),
+        rho_t_2  = ~ cor(., lag_2, use = "pairwise.complete.obs"),
+        rho_t_3  = ~ cor(., lag_3, use = "pairwise.complete.obs"),
+        rho_t_4  = ~ cor(., lag_4, use = "pairwise.complete.obs"),
+        rho_t_5  = ~ cor(., lag_5, use = "pairwise.complete.obs"))),
+        .groups = "drop")
+  
+  colnames(results) <- gsub("tau_pi_R_", "", colnames(results))
+  
+if (type == "annual") { 
+  results <- results %>% filter(year_end >= 1980 & year_end < 2018) #tiny samples oth.
+}
+
+if (type == "quarterly") { 
+  results <- results %>% filter(year_end >= 1980 & year_end < 2018) #tiny samples oth.
+}
+  
+  results <- results %>%
+  mutate(across(starts_with("rho"), format, digits = 4, nsmall = 2)) %>% 
+    rename("$t$"                        = year_end,
+    "$\\rho_{t,t-1}(\\tau_{\\pi}^{R})$" = rho_t_1,
+    "$\\rho_{t,t-2}(\\tau_{\\pi}^{R})$" = rho_t_2,
+    "$\\rho_{t,t-3}(\\tau_{\\pi}^{R})$" = rho_t_3,
+    "$\\rho_{t,t-4}(\\tau_{\\pi}^{R})$" = rho_t_4,
+    "$\\rho_{t,t-5}(\\tau_{\\pi}^{R})$" = rho_t_5)
+  
+  kab      <- kable(results, "latex", booktabs = T, digits = 4, linesep = "", escape = FALSE)
+  path     <- paste("output/output_tables/", namefile, ".tex", sep = "")
+  fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+  
+  tx  <- readLines(path)
+  tx2  <- gsub(pattern = "NA", replacement = "", x = tx)
+  writeLines(tx2, path)
+
+  return()
+}
+
+fn_yearly_correlations(results_rolling_q, "rolling_quarterly_serial_corr", "quarterly")
+fn_yearly_correlations(results_rolling_a, "rolling_annual_serial_corr",    "annual")
+
+```
+
+## All
+
+```{r}
+
+stats_q <- results_rolling_q %>% 
+  summarize(across(tau_pi_R, list(
+          Median = ~ median(.,         na.rm = T),
+          Mean   = ~ mean(.,          na.rm = T),
+          SD     = ~ sd(.,            na.rm = T),
+          Skew   = ~ skewness(.,      na.rm = T),
+          Kurt   = ~ kurtosis(.,      na.rm = T) - 3, #minus three yields excess kurtosis
+          # Min    = ~ min(.,           na.rm = T),
+          P5     = ~ quantile(., 0.05, na.rm = T, names = F),
+          P25    = ~ quantile(., 0.25, na.rm = T, names = F),
+          P75    = ~ quantile(., 0.75, na.rm = T, names = F),
+          P95    = ~ quantile(., 0.95, na.rm = T, names = F),
+          # Max    = ~ max(.,            na.rm = T),
+          n      = ~ n()),
+          .names = "{fn}"))
+
+stats_q <- stats_q %>% rename(
+                          "$Median$" = Median,
+                          "$Mean$"   = Mean,
+                          "$SD$"     = SD,
+                          "$Skew$"   = Skew,
+                          "$Kurt$"   = Kurt,
+                          # "$Min$"    = Min,
+                          "$P5$"     = P5,
+                          "$P25$"    = P25,
+                          "$P75$"    = P75,
+                          "$P95$"    = P95,
+                          # "$Max$"    = Max,
+                          "$n$"      = n)
+
+stats_a <- results_rolling_a %>% 
+  summarize(across(tau_pi_R, list(
+          Median = ~ median(.,         na.rm = T),
+          Mean   = ~ mean(.,          na.rm = T),
+          SD     = ~ sd(.,            na.rm = T),
+          Skew   = ~ skewness(.,      na.rm = T),
+          Kurt   = ~ kurtosis(.,      na.rm = T) - 3, #minus three yields excess kurtosis
+          # Min    = ~ min(.,           na.rm = T),
+          P5     = ~ quantile(., 0.05, na.rm = T, names = F),
+          P25    = ~ quantile(., 0.25, na.rm = T, names = F),
+          P75    = ~ quantile(., 0.75, na.rm = T, names = F),
+          P95    = ~ quantile(., 0.95, na.rm = T, names = F),
+          # Max    = ~ max(.,            na.rm = T),
+          n      = ~ n()),
+          .names = "{fn}"))
+
+stats_a <- stats_a %>% rename(
+                          "$Median$" = Median,
+                          "$Mean$"   = Mean,
+                          "$SD$"     = SD,
+                          "$Skew$"   = Skew,
+                          "$Kurt$"   = Kurt,
+                          # "$Min$"    = Min,
+                          "$P5$"     = P5,
+                          "$P25$"    = P25,
+                          "$P75$"    = P75,
+                          "$P95$"    = P95,
+                          # "$Max$"    = Max,
+                          "$n$"      = n)
+
+stats_all <- rbind(stats_q, stats_a) %>%
+  mutate(across(everything(), format, digits = 3, nsmall = 2))
+
+## Tables
+
+namefile  <- "stats_annual_quarterly"
+
+kab      <- kable(stats_all, "latex", booktabs = T)
+path     <- paste("output/output_tables/", namefile, ".tex", sep = "")
+fileConn <- file(path); writeLines(kab, fileConn); close(fileConn)
+
+```

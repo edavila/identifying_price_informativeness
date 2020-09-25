@@ -1,0 +1,74 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(foreach); library(doParallel); library(AER)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+source("functions/fn_identifying_stocks.R")
+source("functions/fn_recover.R")
+source("functions/fn_rolling_stocks.R")
+
+load("intermediate/data_selected.RData")
+
+cl <- makeCluster(11); registerDoParallel(cl)
+
+```
+
+# Recovering Kalman Gains 
+
+```{r}
+
+# payoffname <- "logistic"
+payoffname <- "growth"
+
+#controls_levels <- c("gs1", "gs10", "unrate") # "booktomarket", "turnover"
+#controls_logs   <- c("cons", "income")
+controls_levels <- c()
+controls_logs   <- c()
+
+```
+
+# Quarterly
+
+```{r}
+
+df_input <- df_q; month_fe <- TRUE
+
+results_full_q <- fn_recover_par(df_input, payoffname, controls_levels, controls_logs, month_fe) # doesn't work with ibes
+#results_full_q <- fn_recover(df_input, payoffname, controls_levels, controls_logs, month_fe)
+
+window_T_q <- 40 # must be less or equal than N_q or N_a
+
+results_rolling_q <- fn_rolling_stocks_par(df_input, payoffname, controls_levels, controls_logs, window_T_q, month_fe)
+# results_rolling_q <- fn_rolling_stocks(df_input, payoffname, controls_levels, controls_logs, window_T_q, month_fe)
+
+```
+
+# Annual
+
+```{r}
+
+df_input <- df_a; month_fe <- FALSE
+
+results_full_a <- fn_recover_par(df_input, payoffname, controls_levels, controls_logs, month_fe)
+# results_full_a <- fn_recover(df_input, payoffname, controls_levels, controls_logs, month_fe)
+
+window_T_a <- 20
+
+results_rolling_a <- fn_rolling_stocks_par(df_input, payoffname, controls_levels, controls_logs, window_T_a, month_fe)
+# results_rolling_a <- fn_rolling_stocks(df_input, payoffname, controls_levels, controls_logs, window_T_a, month_fe)
+
+stopCluster(cl)
+
+save(results_full_q,    results_full_a,    file = "intermediate/results_full.RData")
+save(results_rolling_q, results_rolling_a, file = "intermediate/results_rolling.RData")
+
+```

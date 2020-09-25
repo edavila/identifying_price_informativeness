@@ -1,0 +1,87 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document:  default
+---
+
+```{r echo=FALSE, include=FALSE}
+
+library(here); library(tidyverse); library(DescTools)
+path <- here::here(); print(path); setwd(path); rm(path)
+
+load("intermediate/dataset_merged.RData")
+
+```
+
+# Restricting observations and constructing variables
+
+Generate payoff variables that match the timing in the paper. The variables *mcap* and *payoff* are expressed in millions of dollars
+
+We restrict the datasets to have at least N_a observations if annual and N_q if quarterly
+
+```{r}
+  
+fn_payoff <- function(input_df, N){
+  
+  df <- input_df %>%
+    mutate(payoff = ebit) %>% 
+    group_by(permno) %>% 
+    filter(!any(is.infinite(adjprc))) %>%
+    filter(!all(payoff == 0)) %>%
+    # filter(!any(is.na(payoff)))
+    filter(!is.na(payoff))
+
+  df <- df %>%
+    group_by(permno) %>%
+    mutate(payoff = Winsorize(payoff, probs = c(0.025, 0.975), na.rm = TRUE),
+           adjprc = Winsorize(adjprc, probs = c(0.025, 0.975), na.rm = TRUE))
+  
+  df <- df %>% 
+    group_by(permno) %>%
+    mutate(log_price                        = log(adjprc),
+           delta_log_price                  = log_price - dplyr::lag(log_price, n = 1, default = NA),
+           payoff_std                       = (payoff - mean(payoff, na.rm = TRUE))/sd(payoff, na.rm = TRUE),
+           payoff_logistic                  = exp(payoff_std)/(1 + exp(payoff_std)),
+           log_payoff_logistic              = log(payoff_logistic),
+           delta_log_payoff_logistic        = log_payoff_logistic - dplyr::lag(log_payoff_logistic, n = 1, default = NA),
+           delta_log_payoff_logistic_future = dplyr::lead(delta_log_payoff_logistic, n = 1, default = NA),
+           payoff_lag                       = dplyr::lag(payoff,  n = 1, default = NA),
+           delta_log_payoff_growth          = ifelse(payoff_lag > 0, (payoff/payoff_lag) - 1, ifelse(payoff_lag < 0, payoff/abs(payoff_lag) + 1, NA)),
+           delta_log_payoff_growth_future   = dplyr::lead(delta_log_payoff_growth, n = 1, default = NA))
+
+  df <- df %>% 
+    select(permno, year, month, log_price, delta_log_price, payoff, payoff_std, payoff_logistic, 
+           delta_log_payoff_logistic, delta_log_payoff_logistic_future, 
+           delta_log_payoff_growth,   delta_log_payoff_growth_future, everything())
+  
+  output_df <- df %>% 
+    group_by(permno) %>% 
+    filter(!is.na(delta_log_price)) %>% # Remove NA observations
+    #filter(!is.na(delta_log_payoff_logistic)) %>%
+    #filter(!is.na(delta_log_payoff_logistic_future)) %>% 
+    filter(!is.na(delta_log_payoff_growth)) %>%
+    filter(!is.na(delta_log_payoff_growth_future)) %>%
+    filter(n() >= N) %>% 
+    ungroup()
+  
+  return(output_df)
+}
+
+N_q <- 40
+N_a <- 20
+
+df_q <- merged_q %>% fn_payoff(N_q) 
+df_a <- merged_a %>% fn_payoff(N_a)
+
+save(df_q, df_a, N_q, N_a, file = "intermediate/data_selected.RData")
+
+n_permno_q <- length(unique(merged_q$permno)); n_permno_q_selected <- length(unique(df_q$permno))
+n_permno_a <- length(unique(merged_a$permno)); n_permno_a_selected <- length(unique(df_a$permno))
+
+permno_list_q <- df_q %>% group_by(permno) %>% count(sort = TRUE)
+permno_list_a <- df_a %>% group_by(permno) %>% count(sort = TRUE)
+
+```

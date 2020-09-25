@@ -1,0 +1,95 @@
+---
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r}
+
+library(here); library(tidyverse); library(lubridate);
+path <- here::here(); print(path); setwd(path); rm(path)
+
+load("input/data_raw/raw_compustat.RData")
+
+```
+
+# Merging CCM to compustat
+
+Note that the CRSP data is monthly, while the compustat data is quarterly/annual. Variables are in millions of dollars.
+We now transform the Compustat **quarterly** data. Output: *compustatq* dataframe.
+
+- inner join, only merge compustat if permno exists in ccmlink
+- remove compustat fiscal ends that do not fall within linked period
+- DATADATE gives us the close of fiscal period
+- Link if any part of the period is within the link date range
+
+```{r}
+
+fn_compustat_ccm <- function(df_input, compustat_ccmlink){
+  
+  df_ccm <- compustat_ccmlink %>%
+  filter(linktype %in% c("LU", "LC", "LS")) %>%
+  filter(linkprim %in% c("P", "C")) %>%
+  inner_join(df_input, by = "gvkey") %>%
+  filter(datadate >= linkdt & (datadate <= linkenddt | is.na(linkenddt))) %>% # linkenddt = NA means ongoing
+  mutate(linktype = factor(linktype, levels = c("LC", "LU", "LS")),
+         linkprim = factor(linkprim, levels = c("P", "C"))) %>% 
+  mutate(year  = year(datadate), month = month(datadate)) %>%
+  select(datadate, year, month, gvkey, permno, everything()) %>%
+  arrange(datadate, permno, linktype, linkprim) %>% 
+  distinct(datadate, permno, .keep_all = T) # eliminate duplicates, due to change of fiscal year -- not a problem with annual
+  
+  return(df_ccm)
+}
+
+df_ccm_q <- fn_compustat_ccm(compustat_fundq, compustat_ccmlink) # quarterly
+df_ccm_a <- fn_compustat_ccm(compustat_funda, compustat_ccmlink) # annual
+
+#duplicates <- df_ccm %>% group_by(datadate, permno) %>% summarize(n = n()) %>% filter(n > 1) # select duplicates  
+
+```
+
+- assets = at, cashflow = oancf, netincome = ni, dividends = cdvc, longtermdebt = dltt
+- assets = atq, cashflow = oancfy, netincome = niq, dividends = cdvcy,  longtermdebt = dlttq
+
+- Annual compustat: EBIT = This item is the sum of Sales - Net (SALE) minus Cost of Goods Sold (COGS) minus Selling, General & Administrative Expense (XSGA) minus Depreciation/Amortization (DP). 
+- Quarterly equivalent of this item is Operating Income After Depreciation - Quarterly (OIADPQ).
+
+```{r}
+
+compustat_q <- df_ccm_q %>%
+  filter(year < 2018) %>% 
+  mutate(book = coalesce(seqq, ceqq + pstkq, atq - ltq) + # shareholders equity
+           coalesce(txditcq, 0) -   # deferred assets plus investment tax credit
+           coalesce(pstkq, 0),      # preferred stock
+         OpProf = revtq - coalesce(cogsq, 0) - coalesce(xintq, 0) - coalesce(xsgaq,0),
+         OpProf = as.numeric(ifelse(is.na(cogsq) & is.na(xintq) & is.na(xsgaq), NA, OpProf)),
+         GrProf = revtq - cogsq,
+         Cflow  = ibq + coalesce(txdiq, 0) + dpq,
+         Inv    = (coalesce(ppegtq - lag(ppegtq), 0) + coalesce(invtq - lag(invtq), 0)) / lag(atq),
+         AstChg = (atq - lag(atq)) / lag(atq) ) %>% # lags uses previously available (may be different from 1 qr)
+  mutate(ebit   = oiadpq,
+         ebitda = oibdpq) %>%
+  select(permno, datadate, year, month, fyearq, atq, ebit, ebitda, oancfy, niq, book, rdq) %>% 
+  arrange(permno, datadate)
+
+compustat_a <- df_ccm_a %>%
+  filter(year < 2018) %>%
+  mutate(book = coalesce(seq, ceq + pstk, at - lt) + # shareholders equity
+           coalesce(txditc, txdb + itcb, 0) -   # deferred assets plus investment tax credit
+           coalesce(pstkrv, pstkl, pstk, 0),    # preferred stock
+         OpProf = revt - coalesce(cogs, 0) - coalesce(xint, 0) - coalesce(xsga,0),
+         OpProf = as.numeric(ifelse(is.na(cogs) & is.na(xint) & is.na(xsga), NA, OpProf)),
+         GrProf = revt - cogs,
+         Cflow  = ib + coalesce(txdi, 0) + dp,
+         Inv    = (coalesce(ppegt - lag(ppegt), 0) + coalesce(invt - lag(invt), 0)) / lag(at),
+         AstChg = (at - lag(at)) / lag(at) ) %>% # lags uses previously available (may be different from 1 yr)
+  select(permno, datadate, year, month, fyear, at, ebit, ebitda, oancf, ni, book) %>% 
+  arrange(permno, datadate)
+
+save(compustat_q, compustat_a, file = "intermediate/clean_compustat.RData")
+
+```
