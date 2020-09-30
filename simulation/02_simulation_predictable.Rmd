@@ -1,0 +1,233 @@
+---
+title: "Predictability"
+author: "Jack Kelly"
+date: "7/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(here); library(tidyverse); library(foreach); library(AER); library(doParallel); library(cowplot); library(latex2exp)
+path <- here::here(); print(path); setwd(path); rm(path)
+set.seed(43)
+
+cl <- makeCluster(11); registerDoParallel(cl)
+
+```
+
+## Parameters
+
+```{r}
+
+mu_x <- 0
+mu_n <- 0
+
+tau_u <- 1
+tau_n <- 1
+
+phi_bar <- 0
+phi_0   <- 0
+phi_1   <- 1
+phi_n   <- 1
+
+phi <- c(phi_bar, phi_0, phi_1)
+
+# TRUE PARAMETERS
+
+var_u <- 1/tau_u
+var_n <- 1/tau_n
+
+tau_pi_true <- (((phi_n/phi_1)^2)*var_n)^(-1)
+
+tau_pi_R_true <- tau_pi_true/(tau_pi_true + tau_u)
+
+```
+
+# Estimation
+
+```{r}
+
+fn_estimation <- function(mu_x, mu_n, tau_u, tau_n, phi_bar, phi_0, phi_1, phi_n, T_total, n = 1){
+  
+  df <- data.frame(u_t     = rnorm(T_total, mean = 0, sd = sqrt(var_u))) %>%
+    mutate(eps_t_n         = rnorm(T_total, mean = 0, sd = sqrt(var_n)),
+           delta_x_future  = mu_x + u_t,
+           delta_n_t       = mu_n + eps_t_n,
+           delta_x         = lag(delta_x_future,1),
+           delta_p         = phi_bar + phi_0*delta_x + phi_1*(delta_x_future) +  phi_n*delta_n_t) %>%
+    filter(is.na(delta_x) == F)
+  
+  # Regressions
+  
+  reg_long    <- lm(delta_p ~ delta_x + delta_x_future, data = df)
+  reg_short   <- lm(delta_p ~ delta_x,                  data = df)
+  
+  reg_delta_x <- lm(delta_x_future ~ delta_x + delta_p, data = df)
+  
+  beta_1  <- summary(reg_long)$coef[3, 1]
+  varphi_1 <- summary(reg_delta_x)$coef[3, 1]
+
+  output <- cbind(n, T_total, beta_1, varphi_1)
+                
+  rownames(output) <- c()
+
+return(output)
+
+}
+
+```
+
+# Simulation
+
+```{r}
+
+T_min  <- 20
+T_max  <- 200
+T_step <- 10
+
+N <- 1000
+
+results <- foreach(T_total = seq(T_min, T_max, T_step), .combine = "rbind", .export = c('fn_estimation'), .packages = c('tidyverse', 'AER', 'foreach')) %do% {
+  foreach(n = seq(1, N, 1), .combine = "rbind", .export = c('fn_estimation'), .packages = c('tidyverse', 'AER')) %do% {
+
+    fn_estimation(mu_x, mu_n, tau_u, tau_n, phi_bar, phi_0, phi_1, phi_n, T_total, n)
+  }
+}
+
+results <- data.frame(results)
+
+```
+
+
+# Figures
+
+```{r}
+
+results_fig <- results %>% 
+  group_by(T_total) %>%
+  summarize(across(c(beta_1, varphi_1),  
+                     list(mean   = ~ mean(.,            na.rm = T),
+                          lowCI  = ~ quantile(., 0.025, na.rm = T),
+                          highCI = ~ quantile(., 0.975, na.rm = T)))) 
+
+x_start <- T_min
+x_end   <- T_max
+x_step  <- 20
+
+y_start <- 0
+y_end   <- 1.6
+y_step  <- 0.1
+
+p1 <- ggplot(results_fig, aes(x = T_total)) +
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  geom_line(aes(y = beta_1_mean, color = "Estimate")) +
+  geom_point(aes(y = beta_1_mean), color = 'blue', alpha = 0.9, size = 1) +
+  geom_ribbon(aes(ymin = beta_1_lowCI,
+                  ymax = beta_1_highCI),
+              alpha = 0.2, linetype = 2, color = 'lightblue', fill = 'lightblue') +
+  geom_line(aes(y = phi_1, color = "True Value"), linetype = "dashed") +
+  scale_color_manual(name = "", values = c("Estimate" = 'blue',                                               
+                                                "True Value" = 'black')) +    
+  scale_x_continuous(breaks = seq(x_start, x_end, x_step), limits = c(x_start, x_end), expand = c(0.02, 0)) + 
+  scale_y_continuous(breaks = seq(y_start, y_end, y_step), limits = c(y_start, y_end)) +
+  labs(title = TeX('$\\phi_1$'), 
+       x = "Period", 
+       y = "") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.justification = c(1, 1), 
+    legend.position = c(1, 1))
+
+# y_start <- 0
+# y_end   <- 3
+# y_step  <- 0.2
+
+p2 <- ggplot(results_fig, aes(x = T_total)) +
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  geom_line(aes(y = varphi_1_mean, color = "Estimate")) +
+  geom_point(aes(y = varphi_1_mean), color = 'blue', alpha = 0.9, size = 1) +
+  geom_ribbon(aes(ymin = varphi_1_lowCI,
+                  ymax = varphi_1_highCI),
+              alpha = 0.2, linetype = 2, color = 'lightblue', fill = 'lightblue') +
+  geom_line(aes(y = 1/phi_1, color = "True Value"), linetype = "dashed") +
+  scale_color_manual(name = "", values = c("Estimate" = 'blue',                                               
+                                                "True Value" = 'black')) +    
+  scale_x_continuous(breaks = seq(x_start, x_end, x_step), limits = c(x_start, x_end), expand = c(0.02, 0)) + 
+  scale_y_continuous(breaks = seq(y_start, y_end, y_step), limits = c(y_start, y_end)) +
+  labs(title = TeX('$\\varphi_1$'), 
+       x = "Period", 
+       y = "") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.justification = c(1, 1), 
+    legend.position = c(1, 1))
+
+ggsave("output/output_simulation/01_predictable_phi.pdf",  plot = p1,  width = 5, height = 5, units = "in", dpi = 300)
+ggsave("output/output_simulation/02_predictable_varphi.pdf", plot = p2,  width = 5, height = 5, units = "in", dpi = 300)
+
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1)
+ggsave("output/output_simulation/predictability.pdf", plot = p, width = 11, height = 5, units = "in", dpi = 300)
+
+```
+
+```{r}
+
+set.seed(46)
+
+df_scatter <- data.frame(u_t   = rnorm(T_total, mean = 0, sd = sqrt(var_u))) %>%
+    mutate(eps_t_n         = rnorm(T_total, mean = 0, sd = sqrt(var_n)),
+           delta_x_future  = mu_x + u_t,
+           delta_n_t       = mu_n + eps_t_n,
+           delta_x         = lag(delta_x_future,1),
+           delta_p         = phi_bar + phi_0*delta_x + phi_1*delta_x_future +  phi_n*delta_n_t) %>%
+    filter(is.na(delta_x) == F) %>% 
+  mutate(delta_x_future_inv = -phi_bar/phi_1 + (1/phi_1)*delta_p)
+
+x_start <- -2
+x_end   <- 2.5
+x_step  <- 0.5
+
+y_start <- -2
+y_end   <- 2.5
+y_step  <- 0.5
+
+p3 <- ggplot(df_scatter) +
+  theme_classic() + 
+  theme(text = element_text(size = 16)) +
+  geom_point(aes(x  = delta_x_future, y = delta_p), color = "brown", alpha = 0.5) +
+  geom_smooth(aes(x = delta_x_future, y = delta_p), method = lm,  color = "steelblue", size = 1.5, se = F) +
+  labs(title = "",
+           x = TeX('$\\Delta x_{t+1}$'), 
+           y = TeX('$\\Delta p$')) +
+  scale_x_continuous(breaks = seq(x_start, x_end, x_step), limits = c(x_start, x_end), expand = c(0.02, 0.0)) + 
+  scale_y_continuous(breaks = seq(y_start, y_end, y_step), limits = c(y_start, y_end))
+
+x_start <- -2
+x_end   <- 2.5
+x_step  <- 0.5
+
+y_start <- -2
+y_end   <- 2.5
+y_step  <- 0.5
+
+p4 <- ggplot(df_scatter) +
+  theme_classic() + 
+  theme(text = element_text(size = 16)) +
+  geom_point(aes(x = delta_p,  y = delta_x_future), color = "brown", alpha = 0.5) +
+  geom_smooth(aes(x = delta_p, y = delta_x_future), method = lm,  color = "steelblue", size = 1.5, se = F) +
+  geom_line(aes(x = delta_p,   y = delta_x_future_inv), color = 'black', size = 1.5, linetype = "dashed") +
+  labs(title = "",
+           x = TeX('$\\Delta p$'),
+           y = TeX('$\\Delta x_{t+1}$')) +
+  scale_x_continuous(breaks = seq(x_start, x_end, x_step), limits = c(x_start, x_end), expand = c(0.02, 0.0)) + 
+  scale_y_continuous(breaks = seq(y_start, y_end, y_step), limits = c(y_start, y_end)) +
+
+ggsave("output/output_simulation/03_predictable_scatter_phi.pdf",  plot = p3,  width = 10.5, height = 6, units = "in", dpi = 300)
+ggsave("output/output_simulation/04_predictable_scatter_zeta.pdf", plot = p4,  width = 10.5, height = 6, units = "in", dpi = 300)
+
+p <- plot_grid(p3, p4, ncol = 2, nrow = 1)
+ggsave("output/output_simulation/predictability_scatter.pdf", plot = p, width = 11, height = 5, units = "in", dpi = 300)
+
+reg_long    <- lm(delta_p ~ delta_x + delta_x_future, data = df_scatter)
+reg_delta_x <- lm(delta_x_future ~ delta_x + delta_p, data = df_scatter)
+```

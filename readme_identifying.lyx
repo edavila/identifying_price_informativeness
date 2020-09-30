@@ -252,5 +252,9 @@ rolling_q.csv
  include the estimated rolling measures price informativeness by stock (permno).
 \end_layout
 
+\begin_layout Itemize
+The simulation folder includes the simulations in Figures 6, OA-15 and OA-16
+\end_layout
+
 \end_body
 \end_document

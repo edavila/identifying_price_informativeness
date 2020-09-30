@@ -1,0 +1,254 @@
+---
+title: "Learnable and Unlearnable Innovations"
+author: "Jack Kelly"
+date: "7/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(here); library(tidyverse); library(foreach); library(AER); library(doParallel)
+path <- here::here(); print(path); setwd(path); rm(path)
+set.seed(43)
+
+cl <- makeCluster(11); registerDoParallel(cl)
+
+```
+
+## Parameters
+
+```{r}
+
+mu_x <- 0
+mu_n <- 0
+
+tau_u_L <- 4
+tau_u_U <- 4
+tau_n   <- 0.15
+
+phi_bar <- 0
+phi_0   <- 1
+phi_1   <- 1
+phi_n   <- 1
+
+phi <- c(phi_bar, phi_0, phi_1)
+
+# TRUE PARAMETERS
+
+var_u_U <- 1/tau_u_U
+var_u_L <- 1/tau_u_L
+var_n   <- 1/tau_n
+
+var_u_U_cond <- 1/(tau_u_U + tau_u_L)
+
+tau_pi_L_true <- (var_u_U_cond + ((phi_n/phi_1)^2)*var_n)^(-1)
+tau_pi_R_true <- tau_pi_L_true/(tau_pi_L_true + tau_u_L)
+
+var_resid_long_true       <- phi_1^2*var_u_U + phi_1^2*var_u_U      + phi_n^2*var_n
+var_resid_short_true      <- phi_1^2*var_u_L + phi_1^2*var_u_U      + phi_n^2*var_n
+var_resid_short_cond_true <- phi_1^2*var_u_L + phi_1^2*var_u_U_cond + phi_n^2*var_n
+var_resid_u_true          <- var_u_L + var_u_U
+
+var_resid_short_minus_long_true <- var_resid_short_true - var_resid_long_true
+
+rat_true           <- (var_resid_short_true - var_resid_long_true)/((phi_1^2)*var_resid_u_true)
+ratio_var_U_L_true <- (1 - rat_true)/(1 + rat_true)
+xi_true            <- 1/(1 - ratio_var_U_L_true)
+
+ratio_learnable <- 1/(1 + ratio_var_U_L_true)
+
+ratio_learnable
+tau_pi_R_true
+
+```
+
+# Estimation
+
+```{r}
+
+fn_estimation <- function(mu_x, mu_n, tau_u_L, tau_u_U, tau_n, phi_bar, phi_0, phi_1, phi_n, T_total, n = 1){
+  
+  df <- data.frame(u_t_L   = rnorm(T_total, mean = 0, sd = sqrt(var_u_L))) %>%
+    mutate(u_t_U           = rnorm(T_total, mean = 0, sd = sqrt(var_u_U)),
+           eps_t_n         = rnorm(T_total, mean = 0, sd = sqrt(var_n)),
+           u_t_L_lag       = lag(u_t_L, 1),
+           delta_n_t       = mu_n + eps_t_n,
+           delta_x_future  = mu_x + u_t_L + u_t_U,
+           delta_x         = lag(delta_x_future, 1),
+           delta_u_t_L     = u_t_L - lag(u_t_L, 1),
+           delta_u_t_U     = u_t_U - lag(u_t_U, 1),
+           # delta_p_alt     = phi_bar + (phi_0 + phi_1)*delta_x + phi_1*delta_u_t_L + phi_n*delta_n_t,
+           delta_p         = phi_bar + phi_0*delta_x + phi_1*(delta_x_future - delta_u_t_U) + phi_n*delta_n_t) %>%
+    filter(is.na(delta_x) == F)
+  
+  # Regressions
+  
+  reg_long  <- lm(delta_p ~ delta_x + delta_x_future, data = df)
+  reg_short <- lm(delta_p ~ delta_x,                  data = df)
+  reg_u     <- lm(delta_x_future ~ 1,                 data = df)
+  
+  reg_delta_x <- lm(delta_x ~ u_t_L_lag, data = df)
+  
+  ivreg_long  <- ivreg(delta_p ~ delta_x + delta_x_future | u_t_L + u_t_L_lag, data = df)
+  ivreg_short <- ivreg(delta_p ~ delta_x                  | u_t_L_lag,         data = df)
+  
+  df_cond    <- data.frame(resid(reg_short),   df$delta_x) %>% rename(residuals = resid.reg_short.,   delta_x = df.delta_x)
+  df_cond_iv <- data.frame(resid(ivreg_short), df$delta_x) %>% rename(residuals = resid.ivreg_short., delta_x = df.delta_x)
+  
+  reg_cond    <- lm(residuals ~ delta_x, data = df_cond)
+  reg_cond_iv <- lm(residuals ~ delta_x, data = df_cond_iv)
+    
+  # summary(reg_long); anova(reg_long)
+  
+  zeta     <- summary(reg_short)$coef[,1]
+  zeta_bar <- zeta[1]
+  zeta_0   <- zeta[2]
+  beta     <- summary(reg_long)$coef[,1]
+  beta_bar <- beta[1]
+  beta_0   <- beta[2]
+  beta_1   <- beta[3]
+  
+  zeta_iv     <- summary(ivreg_short)$coef[,1]
+  zeta_bar_iv <- zeta_iv[1]
+  zeta_0_iv   <- zeta_iv[2]
+  beta_iv     <- summary(ivreg_long)$coef[,1]
+  beta_bar_iv <- beta_iv[1]
+  beta_0_iv   <- beta_iv[2]
+  beta_1_iv   <- beta_iv[3]
+  
+  R2_long  <- summary(reg_long)$r.squared
+  R2_short <- summary(reg_short)$r.squared
+  
+  var_resid_long  <- sum(resid(reg_long)^2)
+  var_resid_short <- sum(resid(reg_short)^2)
+  var_resid_u     <- sum(resid(reg_u)^2)
+  var_resid_short_minus_long <- var_resid_short - var_resid_long
+
+  var_resid_long_iv  <- sum(resid(ivreg_long)^2) # sum(resid(ivreg_long)^2)/(ivreg_long$nobs-2)
+  var_resid_short_iv <- sum(resid(ivreg_short)^2)  # sum(resid(ivreg_short)^2)/(ivreg_short$nobs-2)
+  var_resid_cond_iv  <- sum(resid(reg_cond_iv)^2)
+  var_resid_short_minus_long_iv <- var_resid_short_iv - var_resid_long_iv
+
+  # Ratios
+  
+  rat           <- (var_resid_short - var_resid_long)/((as.numeric(beta[3])^2)*var_resid_u)
+  ratio_var_U_L <- (1 - rat)/(1 + rat)
+  xi            <- 1/(1 - ratio_var_U_L)
+
+  rat_iv           <- (var_resid_short_iv - var_resid_long_iv)/((as.numeric(beta_iv[3])^2)*var_resid_u)
+  ratio_var_U_L_iv <- (1 - rat)/(1 + rat)
+  xi_iv            <- 1/(1 - ratio_var_U_L)
+
+  # Informativeness
+  
+  tau_pi_R_0 <- (R2_long - R2_short)/(1 - R2_short) # OLS estimates R2
+  tau_pi_R_1 <- (var_resid_short - var_resid_long)/var_resid_short # OLS estimates residual method
+  tau_pi_R_2 <- tau_pi_R_1*xi # OLS estimates residual method
+  
+  tau_pi_R_3 <- (var_resid_short_iv - var_resid_long_iv)/var_resid_cond_iv # IV estimates, no correction
+  
+  rat_iv           <- (var_resid_short_iv - var_resid_long_iv)/((as.numeric(beta_iv[3])^2)*var_resid_u)
+  ratio_var_U_L_iv <- (1 - rat_iv)/(1 + rat_iv)
+  xi_iv            <- 1/(1 - ratio_var_U_L_iv)
+  
+  tau_pi_R_4 <- tau_pi_R_3*xi_iv  # IV estimates, with correction
+   
+output <- cbind(n, T_total,
+                tau_pi_R_0, tau_pi_R_1, tau_pi_R_2, tau_pi_R_3, tau_pi_R_4,
+                beta_bar, beta_0, beta_1, zeta_bar, zeta_0, 
+                beta_bar_iv, beta_0_iv, beta_1_iv, zeta_bar_iv, zeta_0_iv,
+                R2_long, R2_short, 
+                var_resid_long, var_resid_short, var_resid_u, 
+                var_resid_long_iv, var_resid_short_iv, var_resid_cond_iv,
+                rat, ratio_var_U_L, xi, 
+                rat_iv, ratio_var_U_L_iv, xi_iv)
+
+rownames(output) <- c(); output
+
+return(output)
+}
+
+```
+
+# Simulation
+
+```{r}
+
+T_min  <- 20
+T_max  <- 200
+T_step <- 10
+
+N <- 1000
+
+results <- foreach(T_total = seq(T_min, T_max, T_step), .combine = "rbind", .export = c('fn_estimation'), .packages = c('tidyverse', 'AER', 'foreach')) %dopar% {
+  foreach(n = seq(1, N, 1), .combine = "rbind", .export = c('fn_estimation'), .packages = c('tidyverse', 'AER')) %do% {
+
+    fn_estimation(mu_x, mu_n, tau_u_L, tau_u_U, tau_n, phi_bar, phi_0, phi_1, phi_n, T_total, n)
+  }
+}
+
+results <- data.frame(results)
+
+```
+
+# Figures
+
+```{r}
+
+#x <- results %>% filter(T_total == 40) %>% select(tau_pi_R_4)
+#x <- results %>% filter(T_total == 20) %>% select(tau_pi_R_4) %>% 
+#  filter(tau_pi_R_4 < 1 & tau_pi_R_4 > -0.2)
+# x <- results %>% filter(tau_pi_R_4 < 1 & tau_pi_R_4 > -0.2)
+
+results_fig <- results %>%
+  filter(tau_pi_R_4 < 1 & tau_pi_R_4 > -0.2) %>%
+  group_by(T_total) %>%
+  summarize(across(c(xi, xi_iv, var_resid_long, var_resid_long_iv, var_resid_short, var_resid_short_iv, 
+                     tau_pi_R_0, tau_pi_R_1, tau_pi_R_2, tau_pi_R_3, tau_pi_R_4, beta_1,beta_1_iv),  
+                     list(mean   = ~ mean(.,           na.rm = T),
+                          lowCI  = ~ quantile(., 0.05, na.rm = T),
+                          highCI = ~ quantile(., 0.95, na.rm = T))), 
+            .groups = "drop_last")
+
+x_start <- T_min
+x_end   <- T_max
+x_step  <- T_step
+
+y_start <- -0.05
+y_end   <- 0.45
+y_step  <- 0.05
+
+p1 <- ggplot(results_fig, aes(x = T_total)) +
+  theme_classic() +
+  theme(text = element_text(size = 16)) +
+  geom_line(aes(y = tau_pi_R_1_mean, color = "OLS Estimate (Proposition 1)")) +
+  geom_point(aes(y = tau_pi_R_1_mean), color = 'red', alpha = 0.9, size = 1.5) +
+  geom_ribbon(aes(ymin = tau_pi_R_1_lowCI,
+                  ymax = tau_pi_R_1_highCI),
+              alpha = 0.2, linetype = 2, color = 'pink', fill = 'pink') +
+  geom_line(aes(y = tau_pi_R_4_mean, color = "IV  Estimate (Proposition 4)")) +
+  geom_point(aes(y = tau_pi_R_4_mean), color = 'blue', alpha = 0.9, size = 1.5) +
+  geom_ribbon(aes(ymin = tau_pi_R_4_lowCI, 
+                  ymax = tau_pi_R_4_highCI),
+              alpha = 0.2, linetype = 3, color = 'lightblue', fill = 'lightblue') +
+  geom_line(aes(y = tau_pi_R_true, color = "True Price Informativeness"), linetype = 2) +
+  geom_line(aes(y = 0*tau_pi_R_true), linetype = 3) +
+  scale_color_manual(name = "", 
+                     values = c("OLS Estimate (Proposition 1)" = 'red', 
+                                "IV  Estimate (Proposition 4)" = 'blue',
+                                "True Price Informativeness"   = 'black')) +    
+  scale_x_continuous(breaks = seq(x_start, x_end, x_step), limits = c(x_start, x_end), expand = c(0.01, 0.0)) + 
+  scale_y_continuous(breaks = seq(y_start, y_end, y_step), limits = c(y_start, y_end)) +
+  labs(title = "Relative Price Informativeness: Learnable and Unlearnable Innovations", 
+       x = "Period", 
+       y = "") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(legend.justification = c(1, 1), 
+    legend.position = c(1, 1))
+
+ggsave("output/output_simulation/simulation_unlearnable.pdf", plot = p1, width = 10.5, height = 6, units = "in", dpi = 300)
+
+ratio_learnable
+tau_pi_R_true
+
+```
