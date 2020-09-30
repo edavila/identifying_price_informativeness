@@ -17,3 +17,4 @@ Comments
 - The results with public signals are obtained by uncommenting the variables controls_levels and controls_logs in the file 04a_stocks_recover.Rmd and running the code gain.
 - The files rolling_a.csv and rolling_q.csv include the estimated rolling measures
   price informativeness by stock (permno).
+- The simulation folder includes the simulations in Figures 6, OA-15 and OA-16
