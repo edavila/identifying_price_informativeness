@@ -1,8 +1,10 @@
 ---
-title: "Learnable and Unlearnable Innovations"
-author: "Jack Kelly"
-date: "7/31/2020"
-output: html_document
+title: "Identifying Price Informativeness"
+author: "Eduardo Davila^[Yale] & Cecilia Parlatore^[NYU Stern]"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
