@@ -1,3 +1,5 @@
+# The files rolling_a.csv and rolling_q.csv include the estimated rolling measures of price informativeness by stock (permno).
+
 # Replication Code for Identifying Price Informativeness
 
 The main project folder contains five subfolders and fourteen R source/markdown files. The import data subfolder has two R source files
@@ -15,6 +17,5 @@ Comments
 
 - A complete run of the code generates all the figure and tables in the paper with the exception of those with public signals.
 - The results with public signals are obtained by uncommenting the variables controls_levels and controls_logs in the file 04a_stocks_recover.Rmd and running the code gain.
-- The files rolling_a.csv and rolling_q.csv include the estimated rolling measures
-  price informativeness by stock (permno).
+
 - The simulation folder includes the simulations in Figures 6, OA-15 and OA-16
