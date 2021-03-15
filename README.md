@@ -7,9 +7,7 @@ Instructions:
 1. Run the files 01_stocks_import.R, 02_stocks_import_inst_ownership.R, and 03_move_files_to_input_raw.cmd in the import_data folder.
    - The file 03_move_files_to_input_raw.cmd simply moves the output files to the input/data_raw folder. It only works for windows. In other OS's, simply move the files manually.
 
-2. Run the files in the main project folder sequentially, starting with 00b_inst_ownership.Rmd.
-
-3. Alternatively, simply run the file 00_stocks_main.R.
+2. Run the files in the main project folder sequentially. Alternatively, simply run the file 00_stocks_main.R.
 
 Comments:
 
